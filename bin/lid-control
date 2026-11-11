@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+# lid-control: Manage laptop lid close behavior on Linux (acpid + systemd-logind)
+# Author: Bagus Wijaya (Warsky)
+
+CMD="${1:-status}"
+
+set_gnome_power_setting() {
+    local key="$1"
+    local val="$2"
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        local target_uid
+        target_uid=$(id -u "$SUDO_USER" 2>/dev/null)
+        if [ -n "$target_uid" ] && [ -e "/run/user/$target_uid/bus" ]; then
+            sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$target_uid/bus" \
+                gsettings set org.gnome.settings-daemon.plugins.power "$key" "$val" 2>/dev/null || true
+            return
+        fi
+    fi
+    gsettings set org.gnome.settings-daemon.plugins.power "$key" "$val" 2>/dev/null || true
+}
+
+reset_gnome_power_setting() {
+    local key="$1"
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        local target_uid
+        target_uid=$(id -u "$SUDO_USER" 2>/dev/null)
+        if [ -n "$target_uid" ] && [ -e "/run/user/$target_uid/bus" ]; then
+            sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$target_uid/bus" \
+                gsettings reset org.gnome.settings-daemon.plugins.power "$key" 2>/dev/null || true
+            return
+        fi
+    fi
+    gsettings reset org.gnome.settings-daemon.plugins.power "$key" 2>/dev/null || true
+}
+
+case "$CMD" in
+    status)
+        echo "=== Laptop Lid Control Status (acpid + systemd-logind) ==="
+        if [ -f /etc/systemd/logind.conf.d/99-lid-ignore.conf ] && [ -f /etc/acpi/events/lid-state ]; then
+            echo "Mode Status       : ACTIVE (Screen & Keyboard Off, No Suspend)"
+        else
+            echo "Mode Status       : INACTIVE (Default System Suspend)"
+        fi
+        echo "acpid Service     : $(systemctl is-active acpid.service 2>/dev/null || echo inactive)"
+        echo "Lid Hardware State: $(cat /proc/acpi/button/lid/*/state 2>/dev/null | awk '{print $2}' || echo unknown)"
+        echo "Display Backlight : $(cat /sys/class/backlight/*/brightness 2>/dev/null | head -n 1 || echo 0) / $(cat /sys/class/backlight/*/max_brightness 2>/dev/null | head -n 1 || echo 0)"
+        echo "Keyboard Backlight: $(cat /sys/class/leds/*kbd_backlight/brightness 2>/dev/null | head -n 1 || echo 0) / $(cat /sys/class/leds/*kbd_backlight/max_brightness 2>/dev/null | head -n 1 || echo 0)"
+        if [ -f /etc/systemd/logind.conf.d/99-lid-ignore.conf ]; then
+            echo "Logind Override   : Active (/etc/systemd/logind.conf.d/99-lid-ignore.conf)"
+        else
+            echo "Logind Override   : None (default suspend)"
+        fi
+        if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+            TARGET_UID=$(id -u "$SUDO_USER" 2>/dev/null)
+            echo "GNOME Lid AC      : $(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TARGET_UID/bus" gsettings get org.gnome.settings-daemon.plugins.power lid-close-ac-action 2>/dev/null || echo 'n/a')"
+            echo "GNOME Lid Battery : $(sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$TARGET_UID/bus" gsettings get org.gnome.settings-daemon.plugins.power lid-close-battery-action 2>/dev/null || echo 'n/a')"
+        else
+            echo "GNOME Lid AC      : $(gsettings get org.gnome.settings-daemon.plugins.power lid-close-ac-action 2>/dev/null || echo 'n/a')"
+            echo "GNOME Lid Battery : $(gsettings get org.gnome.settings-daemon.plugins.power lid-close-battery-action 2>/dev/null || echo 'n/a')"
+        fi
+        ;;
+    on)
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "[*] Elevating to root privileges to apply system settings..."
+            exec sudo "$0" "$@"
+        fi
+        echo "Enabling Screen-Off mode on lid close..."
+        mkdir -p /etc/systemd/logind.conf.d
+        cat << 'CONF' > /etc/systemd/logind.conf.d/99-lid-ignore.conf
+[Login]
+HandleLidSwitch=ignore
+HandleLidSwitchExternalPower=ignore
+HandleLidSwitchDocked=ignore
+CONF
+        chmod 644 /etc/systemd/logind.conf.d/99-lid-ignore.conf
+        systemctl reload systemd-logind
+        systemctl restart acpid
+        set_gnome_power_setting lid-close-ac-action 'nothing'
+        set_gnome_power_setting lid-close-battery-action 'nothing'
+        echo "[✓] Screen-Off mode successfully enabled!"
+        ;;
+    off)
+        if [ "$(id -u)" -ne 0 ]; then
+            echo "[*] Elevating to root privileges to restore system settings..."
+            exec sudo "$0" "$@"
+        fi
+        echo "Restoring default system suspend behavior..."
+        rm -f /etc/systemd/logind.conf.d/99-lid-ignore.conf
+        systemctl reload systemd-logind
+        reset_gnome_power_setting lid-close-ac-action
+        reset_gnome_power_setting lid-close-battery-action
+        echo "[✓] Successfully reverted to default suspend behavior!"
+        ;;
+    log)
+        tail -n 20 /var/log/lid_backlight.log 2>/dev/null || echo "No logs found at /var/log/lid_backlight.log"
+        ;;
+    *)
+        echo "Usage: lid-control {status|on|off|log}"
+        exit 1
+        ;;
+esac
