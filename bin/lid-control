@@ -3,6 +3,7 @@
 # Author: Bagus Wijaya (Warsky)
 
 CMD="${1:-status}"
+STATE_DIR="/var/lib/lid-control"
 
 set_gnome_power_setting() {
     local key="$1"
@@ -37,7 +38,7 @@ case "$CMD" in
     status)
         echo "=== Laptop Lid Control Status (acpid + systemd-logind) ==="
         if [ -f /etc/systemd/logind.conf.d/99-lid-ignore.conf ] && [ -f /etc/acpi/events/lid-state ]; then
-            echo "Mode Status       : ACTIVE (Screen & Keyboard Off, No Suspend)"
+            echo "Mode Status       : ACTIVE (Screen Blank & Keyboard Off, No Suspend)"
         else
             echo "Mode Status       : INACTIVE (Default System Suspend)"
         fi
@@ -45,6 +46,12 @@ case "$CMD" in
         echo "Lid Hardware State: $(cat /proc/acpi/button/lid/*/state 2>/dev/null | awk '{print $2}' || echo unknown)"
         echo "Display Backlight : $(cat /sys/class/backlight/*/brightness 2>/dev/null | head -n 1 || echo 0) / $(cat /sys/class/backlight/*/max_brightness 2>/dev/null | head -n 1 || echo 0)"
         echo "Keyboard Backlight: $(cat /sys/class/leds/*kbd_backlight/brightness 2>/dev/null | head -n 1 || echo 0) / $(cat /sys/class/leds/*kbd_backlight/max_brightness 2>/dev/null | head -n 1 || echo 0)"
+        if [ -f "$STATE_DIR/last_kbd_brightness" ]; then
+            echo "Saved Kbd Preset  : Level $(cat "$STATE_DIR/last_kbd_brightness" 2>/dev/null) (persistent in $STATE_DIR)"
+        fi
+        if [ -f "$STATE_DIR/last_display_brightness" ]; then
+            echo "Saved Screen Preset: $(cat "$STATE_DIR/last_display_brightness" 2>/dev/null) (persistent in $STATE_DIR)"
+        fi
         if [ -f /etc/systemd/logind.conf.d/99-lid-ignore.conf ]; then
             echo "Logind Override   : Active (/etc/systemd/logind.conf.d/99-lid-ignore.conf)"
         else
@@ -73,11 +80,13 @@ HandleLidSwitchExternalPower=ignore
 HandleLidSwitchDocked=ignore
 CONF
         chmod 644 /etc/systemd/logind.conf.d/99-lid-ignore.conf
+        mkdir -p "$STATE_DIR"
+        chmod 755 "$STATE_DIR"
         systemctl reload systemd-logind
         systemctl restart acpid
-        set_gnome_power_setting lid-close-ac-action 'nothing'
-        set_gnome_power_setting lid-close-battery-action 'nothing'
-        echo "[✓] Screen-Off mode successfully enabled!"
+        set_gnome_power_setting lid-close-ac-action 'blank'
+        set_gnome_power_setting lid-close-battery-action 'blank'
+        echo "[✓] Screen-Off mode successfully enabled (GNOME blank + acpid keyboard control)!"
         ;;
     off)
         if [ "$(id -u)" -ne 0 ]; then
@@ -92,7 +101,7 @@ CONF
         echo "[✓] Successfully reverted to default suspend behavior!"
         ;;
     log)
-        tail -n 20 /var/log/lid_backlight.log 2>/dev/null || echo "No logs found at /var/log/lid_backlight.log"
+        tail -n 25 /var/log/lid_backlight.log 2>/dev/null || echo "No logs found at /var/log/lid_backlight.log"
         ;;
     *)
         echo "Usage: lid-control {status|on|off|log}"

@@ -25,7 +25,13 @@ systemctl restart acpid
 echo "[*] Removing /usr/local/bin/lid-control..."
 rm -f /usr/local/bin/lid-control
 
-# 4. Reset GNOME power settings to default
+# 4. Remove persistent state directory
+if [ -d /var/lib/lid-control ]; then
+    echo "[*] Cleaning up persistent state directory /var/lib/lid-control..."
+    rm -rf /var/lib/lid-control
+fi
+
+# 5. Reset GNOME power settings to default
 if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
     USER_UID=$(id -u "$SUDO_USER" 2>/dev/null)
     if [ -n "$USER_UID" ] && [ -e "/run/user/$USER_UID/bus" ]; then

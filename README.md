@@ -1,35 +1,36 @@
 # Lid Control (`lid-control`)
 
-A lightweight, hardware-level Linux power utility that turns off both the **display panel backlight** and **keyboard backlight** when the laptop lid is closed — **without suspending the system**.
+A lightweight, robust Linux power utility that turns off both the **display panel** and **keyboard backlight** when the laptop lid is closed — **without suspending the system** and **with full brightness preset preservation**.
 
-Designed for always-on laptop setups (running background AI agents, Docker containers, long downloads, compilation, or SSH/VPN tunnels) in clamshell mode with zero desktop/Wayland extension overhead.
+Designed for always-on laptop setups (running background AI agents, Docker containers, long downloads, compilation, or SSH/VPN tunnels) in clamshell mode.
 
 ---
 
-## Why `acpid` + `systemd-logind`?
+## Why `acpid` + GNOME Blank + `systemd-logind`?
 
-Desktop-level solutions (such as GNOME Shell extensions or user-space D-Bus daemons) suffer from Wayland permission boundaries, compositor restarts, and inability to directly switch off hardware keyboard LEDs.
+Desktop-level solutions (such as GNOME Shell extensions) suffer from Wayland permission boundaries and inability to switch off hardware keyboard LEDs. On the other hand, naive ACPI scripts that force `0` directly into sysfs backlight break GNOME Mutter's internal backlight range validation (`min: 4000`), desyncing the user's brightness slider.
 
-**`lid-control`** operates directly at the kernel ACPI and `sysfs` level:
+**`lid-control`** coordinates all layers cleanly:
 - **Zero CPU/RAM overhead** (~250 KB resident `acpid` daemon).
-- **Works across any desktop or headless session** (Wayland, X11, or TTY).
-- **Direct hardware power cut**: Writes `0` directly to `/sys/class/backlight/*/brightness` and `/sys/class/leds/*kbd_backlight/brightness`.
-- **State preservation**: Automatically saves exact display and keyboard brightness levels before closing and restores them immediately when the lid opens.
+- **Exact Preset Preservation**: Display brightness slider is 100% untouched by delegating screen blanking to GNOME's native DPMS (`'blank'`), eliminating Mutter out-of-range clamp bugs.
+- **Full Keyboard LED Preset Support**: Directly powers down keyboard LEDs (`/sys/class/leds/*kbd_backlight`) via `acpid` and restores the exact saved level (including level `0` / OFF) across lid cycles and reboots.
+- **Persistent State Storage**: Stores state in `/var/lib/lid-control/` instead of volatile RAM (`/tmp`), surviving reboots and system cleanup.
+- **Non-Desktop Fallback**: Gracefully falls back to direct sysfs backlight control when running outside a graphical session (TTY / headless).
 
 ---
 
 ## Architecture
 
 1. **`systemd-logind` Drop-in (`/etc/systemd/logind.conf.d/99-lid-ignore.conf`)**:
-   Configures `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, and `HandleLidSwitchDocked=ignore` to prevent OS suspension when the lid closes, while reloading cleanly without dropping active user sessions.
+   Configures `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, and `HandleLidSwitchDocked=ignore` to prevent OS suspension when the lid closes.
 2. **GNOME Power Policy**:
-   Sets `org.gnome.settings-daemon.plugins.power` `lid-close-ac-action` and `lid-close-battery-action` to `'nothing'` to avoid desktop-layer sleep conflicts.
+   Sets `org.gnome.settings-daemon.plugins.power` `lid-close-ac-action` and `lid-close-battery-action` to `'blank'` so Mutter powers off the display panel cleanly via DPMS while keeping the brightness setting intact.
 3. **ACPI Event Rule (`/etc/acpi/events/lid-state`)**:
    Listens for kernel `button/lid.*` hardware events via `acpid`.
 4. **Hardware Action Script (`/etc/acpi/lid_backlight.sh`)**:
    Reads physical lid status from `/proc/acpi/button/lid/*/state`:
-   - **`closed`**: Saves current display & keyboard brightness to `/tmp/last_display_brightness` and `/tmp/last_kbd_brightness`, then sets both hardware brightness nodes to `0`.
-   - **`open`**: Restores both backlights to their previously saved levels (or sane defaults if no state file exists).
+   - **`closed`**: Saves current keyboard brightness (0–3) to `/var/lib/lid-control/last_kbd_brightness` and turns off keyboard LEDs. Falls back to sysfs screen power-off only if no desktop compositor is active.
+   - **`open`**: Restores keyboard LEDs to their exact previous level (0, 1, 2, or 3) and unblanks fallback devices.
 5. **CLI Utility (`/usr/local/bin/lid-control`)**:
    Instant terminal management for inspecting status, toggling modes, or reading hardware event logs.
 
@@ -74,14 +75,15 @@ sudo lid-control off
 
 ```text
 === Laptop Lid Control Status (acpid + systemd-logind) ===
-Mode Status       : ACTIVE (Screen & Keyboard Off, No Suspend)
+Mode Status       : ACTIVE (Screen Blank & Keyboard Off, No Suspend)
 acpid Service     : active
 Lid Hardware State: open
-Display Backlight : 200000 / 400000
+Display Backlight : 185166 / 400000
 Keyboard Backlight: 1 / 3
+Saved Kbd Preset  : Level 1 (persistent in /var/lib/lid-control)
 Logind Override   : Active (/etc/systemd/logind.conf.d/99-lid-ignore.conf)
-GNOME Lid AC      : 'nothing'
-GNOME Lid Battery : 'nothing'
+GNOME Lid AC      : 'blank'
+GNOME Lid Battery : 'blank'
 ```
 
 ---
