@@ -3,7 +3,7 @@
 
 set -euo pipefail
 shopt -s nullglob
-if [ "$(id -u)" -eq 0 ] || [ -z "${LID_CONTROL_SYSROOT:-}" ]; then
+if [[ "$(id -u)" -eq 0 || -z "${LID_CONTROL_SYSROOT:-}" ]]; then
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 fi
 
@@ -24,7 +24,7 @@ Options:
 EOF
 }
 
-while [ "$#" -gt 0 ]; do
+while [[ "$#" -gt 0 ]]; do
     case "$1" in
         --no-enable)
             ENABLE_ON_INSTALL=0
@@ -48,16 +48,16 @@ while [ "$#" -gt 0 ]; do
     shift
 done
 
-if [ "$(id -u)" -ne 0 ]; then
+if [[ "$(id -u)" -ne 0 ]]; then
     echo "[*] Elevating to root privileges for installation..."
     args=()
-    if [ "$ENABLE_ON_INSTALL" -eq 0 ]; then
+    if [[ "$ENABLE_ON_INSTALL" -eq 0 ]]; then
         args+=(--no-enable)
     fi
-    if [ "$CLEAN_BACKUPS" -eq 0 ]; then
+    if [[ "$CLEAN_BACKUPS" -eq 0 ]]; then
         args+=(--keep-backups)
     fi
-    if [ "${#args[@]}" -gt 0 ]; then
+    if [[ "${#args[@]}" -gt 0 ]]; then
         exec sudo "$(realpath "$0")" "${args[@]}"
     else
         exec sudo "$(realpath "$0")"
@@ -95,16 +95,16 @@ echo "[*] Installing lid-control CLI to /usr/local/bin/lid-control..."
 install -m 0755 "${DIR}/bin/lid-control" /usr/local/bin/lid-control
 
 # 6. Optionally remove stale .bak-* files from earlier manual deployments
-if [ "$CLEAN_BACKUPS" -eq 1 ]; then
+if [[ "$CLEAN_BACKUPS" -eq 1 ]]; then
     backups=(/usr/local/bin/lid-control.bak-* /etc/acpi/lid_backlight.sh.bak-*)
-    if [ "${#backups[@]}" -gt 0 ]; then
+    if [[ "${#backups[@]}" -gt 0 ]]; then
         echo "[*] Removing ${#backups[@]} stale backup file(s)..."
         rm -f "${backups[@]}"
     fi
 fi
 
 # 7. Activate lid-control (logind override, acpid restart, GNOME gsettings) or just reload acpid
-if [ "$ENABLE_ON_INSTALL" -eq 1 ]; then
+if [[ "$ENABLE_ON_INSTALL" -eq 1 ]]; then
     /usr/local/bin/lid-control on
 else
     systemctl restart acpid.service 2>/dev/null || systemctl start acpid.service 2>/dev/null || true

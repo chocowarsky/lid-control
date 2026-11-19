@@ -24,7 +24,7 @@ assert_eq() {
     local expected="$1"
     local actual="$2"
     local msg="$3"
-    if [ "$expected" = "$actual" ]; then
+    if [[ "$expected" = "$actual" ]]; then
         pass "$msg"
     else
         fail "$msg (expected '$expected', got '$actual')"
@@ -58,7 +58,7 @@ mkdir -p "$MOCK_BIN"
 
 cat << 'EOF' > "$MOCK_BIN/sudo"
 #!/usr/bin/env bash
-if [ -n "${MOCK_SUDO_LOG:-}" ]; then
+if [[ -n "${MOCK_SUDO_LOG:-}" ]]; then
     printf '%s\n' "$*" > "$MOCK_SUDO_LOG"
 fi
 exit 0
@@ -71,10 +71,10 @@ EOF
 
 cat << 'EOF' > "$MOCK_BIN/systemctl"
 #!/usr/bin/env bash
-if [ "${1:-}" = "is-active" ]; then
+if [[ "${1:-}" = "is-active" ]]; then
     state="${MOCK_SYSTEMCTL_STATE:-active}"
     printf '%s\n' "$state"
-    if [ "$state" = "active" ]; then
+    if [[ "$state" = "active" ]]; then
         exit 0
     fi
     exit 3
@@ -84,7 +84,7 @@ EOF
 
 cat << 'EOF' > "$MOCK_BIN/gsettings"
 #!/usr/bin/env bash
-if [ "${1:-}" = "get" ]; then
+if [[ "${1:-}" = "get" ]]; then
     printf "'blank'\n"
 fi
 exit 0
@@ -132,7 +132,7 @@ for s in "${SCRIPTS[@]}"; do
     else
         fail "bash -n syntax check: $(basename "$s")"
     fi
-    if [ -x "$s" ]; then
+    if [[ -x "$s" ]]; then
         pass "executable bit set: $(basename "$s")"
     else
         fail "executable bit set: $(basename "$s")"
@@ -170,7 +170,7 @@ assert_contains "$(cat "$REPO_DIR/config/lid-control.logrotate")" "copytruncate"
 
 echo "=== 2. Non-Root Self-Elevation Regression Tests ==="
 
-if [ "$(id -u)" -ne 0 ]; then
+if [[ "$(id -u)" -ne 0 ]]; then
     SUDO_LOG="$TMP_ROOT/sudo_args.log"
     TEST_SYSROOT="$TMP_ROOT/elevate_sysroot"
     mkdir -p "$TEST_SYSROOT"
@@ -208,7 +208,7 @@ fi
 
 echo "=== 3. Behavioral Tests (scripts/lid_backlight.sh & bin/lid-control) ==="
 
-if [ "$(id -u)" -eq 0 ]; then
+if [[ "$(id -u)" -eq 0 ]]; then
     printf '[INFO] running as root; skipping non-root LID_CONTROL_SYSROOT isolation tests\n'
 else
     SYSROOT="$TMP_ROOT/sysroot"
@@ -326,4 +326,4 @@ else
 fi
 
 echo "=== Summary: $PASS_COUNT passed, $FAIL_COUNT failed ==="
-[ "$FAIL_COUNT" -eq 0 ]
+[[ "$FAIL_COUNT" -eq 0 ]]

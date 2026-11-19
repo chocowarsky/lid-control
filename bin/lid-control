@@ -6,7 +6,7 @@ set -uo pipefail
 shopt -s nullglob
 
 SYSROOT=""
-if [ "$(id -u)" -ne 0 ] && [ -n "${LID_CONTROL_SYSROOT:-}" ]; then
+if [[ "$(id -u)" -ne 0 && -n "${LID_CONTROL_SYSROOT:-}" ]]; then
     SYSROOT="$LID_CONTROL_SYSROOT"
 else
     PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
@@ -21,7 +21,7 @@ LOG_FILE="${SYSROOT}/var/log/lid_backlight.log"
 require_root() {
     local message="$1"
     shift
-    if [ "$(id -u)" -ne 0 ]; then
+    if [[ "$(id -u)" -ne 0 ]]; then
         echo "[*] $message"
         exec sudo "$(realpath "$0")" "$@"
     fi
@@ -30,10 +30,10 @@ require_root() {
 run_gsettings() {
     local subcmd="$1"
     shift
-    if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ]; then
+    if [[ -n "${SUDO_USER:-}" && "$SUDO_USER" != "root" ]]; then
         local target_uid
         target_uid=$(id -u "$SUDO_USER" 2>/dev/null || true)
-        if [ -n "$target_uid" ] && [ -e "/run/user/$target_uid/bus" ]; then
+        if [[ -n "$target_uid" && -e "/run/user/$target_uid/bus" ]]; then
             sudo -u "$SUDO_USER" DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$target_uid/bus" \
                 gsettings "$subcmd" org.gnome.settings-daemon.plugins.power "$@" 2>/dev/null
             return $?
@@ -51,9 +51,9 @@ get_acpid_status() {
     svc=$(systemctl is-active acpid.service 2>/dev/null) || svc="${svc:-inactive}"
     sock=$(systemctl is-active acpid.socket 2>/dev/null) || sock="${sock:-inactive}"
     path=$(systemctl is-active acpid.path 2>/dev/null) || path="${path:-inactive}"
-    if [ "$svc" = "active" ]; then
+    if [[ "$svc" = "active" ]]; then
         printf 'active (socket: %s, path: %s)\n' "$sock" "$path"
-    elif [ "$sock" = "active" ] || [ "$path" = "active" ]; then
+    elif [[ "$sock" = "active" || "$path" = "active" ]]; then
         printf 'standby (service: %s, socket: %s, path: %s)\n' "$svc" "$sock" "$path"
     else
         printf 'inactive (service: %s, socket: %s, path: %s)\n' "$svc" "$sock" "$path"
@@ -62,7 +62,7 @@ get_acpid_status() {
 
 get_lid_state() {
     local files=("$SYSROOT"/proc/acpi/button/lid/*/state)
-    if [ "${#files[@]}" -gt 0 ]; then
+    if [[ "${#files[@]}" -gt 0 ]]; then
         local state
         state=$(awk 'NR==1 {print $2}' "${files[0]}" 2>/dev/null || true)
         printf '%s\n' "${state:-unknown}"
@@ -75,7 +75,7 @@ get_panel_status() {
     local connectors=("$SYSROOT"/sys/class/drm/*-eDP-* "$SYSROOT"/sys/class/drm/*-LVDS-* "$SYSROOT"/sys/class/drm/*-DSI-*)
     local conn name enabled dpms
     for conn in "${connectors[@]}"; do
-        if [ -f "$conn/enabled" ] && [ -f "$conn/dpms" ]; then
+        if [[ -f "$conn/enabled" && -f "$conn/dpms" ]]; then
             name=$(basename "$conn")
             enabled=$(cat "$conn/enabled" 2>/dev/null || echo "unknown")
             dpms=$(cat "$conn/dpms" 2>/dev/null || echo "unknown")
@@ -88,7 +88,7 @@ get_panel_status() {
 
 get_backlight_status() {
     local dirs=("$@")
-    if [ "${#dirs[@]}" -eq 0 ]; then
+    if [[ "${#dirs[@]}" -eq 0 ]]; then
         printf 'n/a\n'
         return 0
     fi
@@ -102,7 +102,7 @@ get_backlight_status() {
 case "$CMD" in
     status)
         echo "=== Laptop Lid Control Status (acpid + systemd-logind) ==="
-        if [ -f "$LOGIND_CONF" ] && [ -f "$ACPI_EVENT_FILE" ]; then
+        if [[ -f "$LOGIND_CONF" && -f "$ACPI_EVENT_FILE" ]]; then
             echo "Mode Status       : ACTIVE (Screen Blank & Keyboard Off, No Suspend)"
         else
             echo "Mode Status       : INACTIVE (Default System Suspend)"
@@ -112,13 +112,13 @@ case "$CMD" in
         echo "Panel State       : $(get_panel_status)"
         echo "Display Backlight : $(get_backlight_status "$SYSROOT"/sys/class/backlight/*)"
         echo "Keyboard Backlight: $(get_backlight_status "$SYSROOT"/sys/class/leds/*kbd_backlight)"
-        if [ -f "$STATE_DIR/last_kbd_brightness" ]; then
+        if [[ -f "$STATE_DIR/last_kbd_brightness" ]]; then
             echo "Saved Kbd Preset  : Level $(cat "$STATE_DIR/last_kbd_brightness" 2>/dev/null) (persistent in $STATE_DIR)"
         fi
-        if [ -f "$STATE_DIR/last_display_brightness" ]; then
+        if [[ -f "$STATE_DIR/last_display_brightness" ]]; then
             echo "Saved Screen Preset: $(cat "$STATE_DIR/last_display_brightness" 2>/dev/null) (persistent in $STATE_DIR)"
         fi
-        if [ -f "$LOGIND_CONF" ]; then
+        if [[ -f "$LOGIND_CONF" ]]; then
             echo "Logind Override   : Active ($LOGIND_CONF)"
         else
             echo "Logind Override   : None (default suspend)"
