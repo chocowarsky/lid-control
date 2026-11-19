@@ -98,6 +98,18 @@ GNOME Lid Battery : 'blank'
 
 ---
 
+## Testing & CI Audit
+
+Run the automated audit and behavioral regression suite locally (uses an isolated non-root `LID_CONTROL_SYSROOT` without modifying system hardware files):
+
+```bash
+./tests/test_lid_control.sh
+```
+
+Every push and pull request to `main` also runs `ShellCheck` and `./tests/test_lid_control.sh` via [`.github/workflows/audit.yml`](.github/workflows/audit.yml).
+
+---
+
 ## Uninstallation
 
 To cleanly remove all system hooks, scripts, logrotate rule, and restore default Ubuntu suspend behavior:

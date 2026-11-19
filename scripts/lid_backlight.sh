@@ -3,14 +3,20 @@
 # Powered by acpid & kernel ACPI events (sysfs hardware control)
 
 set -uo pipefail
-PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 shopt -s nullglob
 
-STATE_DIR="/var/lib/lid-control"
-LOGIND_OVERRIDE="/etc/systemd/logind.conf.d/99-lid-ignore.conf"
+SYSROOT=""
+if [ "$(id -u)" -ne 0 ] && [ -n "${LID_CONTROL_SYSROOT:-}" ]; then
+    SYSROOT="$LID_CONTROL_SYSROOT"
+else
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
+
+STATE_DIR="${SYSROOT}/var/lib/lid-control"
+LOGIND_OVERRIDE="${SYSROOT}/etc/systemd/logind.conf.d/99-lid-ignore.conf"
 STATE_FILE="$STATE_DIR/last_display_brightness"
 KBD_STATE_FILE="$STATE_DIR/last_kbd_brightness"
-LOG_FILE="/var/log/lid_backlight.log"
+LOG_FILE="${SYSROOT}/var/log/lid_backlight.log"
 
 log_event() {
     printf '%s [acpid] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$1" >> "$LOG_FILE" 2>/dev/null || true
@@ -28,7 +34,7 @@ is_uint() {
 }
 
 get_lid_state() {
-    local lid_files=(/proc/acpi/button/lid/*/state)
+    local lid_files=("$SYSROOT"/proc/acpi/button/lid/*/state)
     if [ "${#lid_files[@]}" -gt 0 ]; then
         awk 'NR==1 {print $2}' "${lid_files[0]}" 2>/dev/null || true
     fi
@@ -90,8 +96,8 @@ fi
 
 mkdir -p "$STATE_DIR" 2>/dev/null || true
 
-BACKLIGHT_DIR=$(first_glob /sys/class/backlight/*)
-KBD_DIR=$(first_glob /sys/class/leds/*kbd_backlight)
+BACKLIGHT_DIR=$(first_glob "$SYSROOT"/sys/class/backlight/*)
+KBD_DIR=$(first_glob "$SYSROOT"/sys/class/leds/*kbd_backlight)
 GNOME_RUNNING=0
 if pgrep -x gnome-shell >/dev/null 2>&1; then
     GNOME_RUNNING=1

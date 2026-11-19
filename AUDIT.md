@@ -90,4 +90,16 @@ Inspection of `/usr/libexec/gsd-power` (`gnome-settings-daemon` `50.0-1ubuntu1`)
 
 ### Finding 6 (Low): Unbounded log growth & stale `.bak-*` host artifacts
 - **Observation:** `/var/log/lid_backlight.log` had no `logrotate` configuration, and `/usr/local/bin/` and `/etc/acpi/` on the host contained timestamped `.bak-*` files from prior updates.
-- **Fix Applied:** Added `config/lid-control.logrotate` (installed to `/etc/logrotate.d/lid-control`), `--clean-backups` / `--no-enable` options in `install.sh`, and `--purge` option in `uninstall.sh`.
+- **Fix Applied:** Added `config/lid-control.logrotate` (installed to `/etc/logrotate.d/lid-control`), automatic stale `*.bak-*` cleanup in `install.sh` (with `--keep-backups` and `--no-enable` options) and `uninstall.sh` (with `--purge` to delete logs).
+
+### Finding 7 (Medium): Non-root self-elevation aborted under `set -e` in `install.sh` & `uninstall.sh`
+- **Observation:** Under `set -euo pipefail`, short-circuit flag checks (`[ "$ENABLE_ON_INSTALL" -eq 0 ] && args+=(...)` in `install.sh` and `[ "$PURGE" -eq 1 ] && args+=(--purge)` in `uninstall.sh`) returned exit code `1` whenever default flags were used, terminating both scripts before `exec sudo` ran.
+- **Impact:** Running `./install.sh` or `./uninstall.sh` without `sudo` exited silently with status `1` after printing the elevation message instead of invoking `sudo`.
+- **Fix Applied:** Replaced `&&` conditionals with explicit `if ... then ... fi` blocks and guarded array expansion when building `exec sudo` arguments.
+
+---
+
+## 5. Automated Test & CI Verification
+
+- **Regression & Behavior Suite (`tests/test_lid_control.sh`)**: Runs `bash -n` syntax checks, strict-mode header checks, executable permission checks, secret scanning, config verification, non-root `sudo` self-elevation regression tests, and isolated `LID_CONTROL_SYSROOT` behavioral tests (47 assertions covering inactive-mode guard, GNOME/non-GNOME backlight transitions, level `0` preservation, `max_brightness` clamping, corrupted state resilience, multi-lid ACPI parsing, DRM panel DPMS status, and `systemctl` exit handling).
+- **Continuous Integration (`.github/workflows/audit.yml`)**: Runs `ShellCheck` and `./tests/test_lid_control.sh` on every push and pull request to `main`.

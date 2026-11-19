@@ -3,14 +3,20 @@
 # Author: Bagus Wijaya (Warsky)
 
 set -uo pipefail
-PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 shopt -s nullglob
 
+SYSROOT=""
+if [ "$(id -u)" -ne 0 ] && [ -n "${LID_CONTROL_SYSROOT:-}" ]; then
+    SYSROOT="$LID_CONTROL_SYSROOT"
+else
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
+
 CMD="${1:-status}"
-STATE_DIR="/var/lib/lid-control"
-LOGIND_CONF="/etc/systemd/logind.conf.d/99-lid-ignore.conf"
-ACPI_EVENT_FILE="/etc/acpi/events/lid-state"
-LOG_FILE="/var/log/lid_backlight.log"
+STATE_DIR="${SYSROOT}/var/lib/lid-control"
+LOGIND_CONF="${SYSROOT}/etc/systemd/logind.conf.d/99-lid-ignore.conf"
+ACPI_EVENT_FILE="${SYSROOT}/etc/acpi/events/lid-state"
+LOG_FILE="${SYSROOT}/var/log/lid_backlight.log"
 
 require_root() {
     local message="$1"
@@ -55,7 +61,7 @@ get_acpid_status() {
 }
 
 get_lid_state() {
-    local files=(/proc/acpi/button/lid/*/state)
+    local files=("$SYSROOT"/proc/acpi/button/lid/*/state)
     if [ "${#files[@]}" -gt 0 ]; then
         local state
         state=$(awk 'NR==1 {print $2}' "${files[0]}" 2>/dev/null || true)
@@ -66,7 +72,7 @@ get_lid_state() {
 }
 
 get_panel_status() {
-    local connectors=(/sys/class/drm/*-eDP-* /sys/class/drm/*-LVDS-* /sys/class/drm/*-DSI-*)
+    local connectors=("$SYSROOT"/sys/class/drm/*-eDP-* "$SYSROOT"/sys/class/drm/*-LVDS-* "$SYSROOT"/sys/class/drm/*-DSI-*)
     local conn name enabled dpms
     for conn in "${connectors[@]}"; do
         if [ -f "$conn/enabled" ] && [ -f "$conn/dpms" ]; then
@@ -104,8 +110,8 @@ case "$CMD" in
         echo "acpid Service     : $(get_acpid_status)"
         echo "Lid Hardware State: $(get_lid_state)"
         echo "Panel State       : $(get_panel_status)"
-        echo "Display Backlight : $(get_backlight_status /sys/class/backlight/*)"
-        echo "Keyboard Backlight: $(get_backlight_status /sys/class/leds/*kbd_backlight)"
+        echo "Display Backlight : $(get_backlight_status "$SYSROOT"/sys/class/backlight/*)"
+        echo "Keyboard Backlight: $(get_backlight_status "$SYSROOT"/sys/class/leds/*kbd_backlight)"
         if [ -f "$STATE_DIR/last_kbd_brightness" ]; then
             echo "Saved Kbd Preset  : Level $(cat "$STATE_DIR/last_kbd_brightness" 2>/dev/null) (persistent in $STATE_DIR)"
         fi
@@ -125,7 +131,7 @@ case "$CMD" in
     on)
         require_root "Elevating to root privileges to apply system settings..." "$@"
         echo "Enabling Screen-Off mode on lid close..."
-        mkdir -p /etc/systemd/logind.conf.d
+        mkdir -p "${SYSROOT}/etc/systemd/logind.conf.d"
         cat << 'CONF' > "$LOGIND_CONF"
 [Login]
 HandleLidSwitch=ignore

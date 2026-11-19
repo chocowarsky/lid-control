@@ -2,8 +2,10 @@
 # install.sh: Install lid-control CLI, acpid event hooks, logrotate policy, and enable mode
 
 set -euo pipefail
-PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 shopt -s nullglob
+if [ "$(id -u)" -eq 0 ] || [ -z "${LID_CONTROL_SYSROOT:-}" ]; then
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
 
 DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 STATE_DIR="/var/lib/lid-control"
@@ -49,9 +51,17 @@ done
 if [ "$(id -u)" -ne 0 ]; then
     echo "[*] Elevating to root privileges for installation..."
     args=()
-    [ "$ENABLE_ON_INSTALL" -eq 0 ] && args+=(--no-enable)
-    [ "$CLEAN_BACKUPS" -eq 0 ] && args+=(--keep-backups)
-    exec sudo "$(realpath "$0")" "${args[@]}"
+    if [ "$ENABLE_ON_INSTALL" -eq 0 ]; then
+        args+=(--no-enable)
+    fi
+    if [ "$CLEAN_BACKUPS" -eq 0 ]; then
+        args+=(--keep-backups)
+    fi
+    if [ "${#args[@]}" -gt 0 ]; then
+        exec sudo "$(realpath "$0")" "${args[@]}"
+    else
+        exec sudo "$(realpath "$0")"
+    fi
 fi
 
 echo "=== Installing Linux Laptop Lid Control (acpid + systemd-logind) ==="

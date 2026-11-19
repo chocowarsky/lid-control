@@ -1,0 +1,31 @@
+name: Audit & Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get update && sudo apt-get install -y shellcheck
+
+      - name: Run ShellCheck static audit
+        run: |
+          shellcheck \
+            bin/lid-control \
+            scripts/lid_backlight.sh \
+            install.sh \
+            uninstall.sh \
+            tests/test_lid_control.sh
+
+      - name: Run automated regression & behavior suite
+        run: |
+          chmod +x bin/lid-control scripts/lid_backlight.sh install.sh uninstall.sh tests/test_lid_control.sh
+          ./tests/test_lid_control.sh

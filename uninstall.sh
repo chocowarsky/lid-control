@@ -2,8 +2,10 @@
 # uninstall.sh: Remove lid-control CLI, acpid hooks, logrotate rule, and restore default suspend
 
 set -euo pipefail
-PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 shopt -s nullglob
+if [ "$(id -u)" -eq 0 ] || [ -z "${LID_CONTROL_SYSROOT:-}" ]; then
+    PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+fi
 
 PURGE=0
 
@@ -38,8 +40,14 @@ done
 if [ "$(id -u)" -ne 0 ]; then
     echo "[*] Elevating to root privileges for uninstallation..."
     args=()
-    [ "$PURGE" -eq 1 ] && args+=(--purge)
-    exec sudo "$(realpath "$0")" "${args[@]}"
+    if [ "$PURGE" -eq 1 ]; then
+        args+=(--purge)
+    fi
+    if [ "${#args[@]}" -gt 0 ]; then
+        exec sudo "$(realpath "$0")" "${args[@]}"
+    else
+        exec sudo "$(realpath "$0")"
+    fi
 fi
 
 echo "=== Uninstalling Linux Laptop Lid Control ==="
