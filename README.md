@@ -57,8 +57,8 @@ sudo ./install.sh
 ```
 
 Optional installer flags:
-- `sudo ./install.sh --clean-backups`: Also removes stale `*.bak-*` backup files from `/usr/local/bin` and `/etc/acpi`.
 - `sudo ./install.sh --no-enable`: Installs files and logrotate policy without enabling `lid-control on` immediately.
+- `sudo ./install.sh --keep-backups`: Preserves any existing `*.bak-*` backup files in `/usr/local/bin` and `/etc/acpi` (by default, `install.sh` removes stale `*.bak-*` backups).
 
 ---
 
@@ -106,7 +106,7 @@ To cleanly remove all system hooks, scripts, logrotate rule, and restore default
 sudo ./uninstall.sh
 ```
 
-Pass `--purge` to also delete `/var/log/lid_backlight.log*` and any stale `*.bak-*` backup files:
+Pass `--purge` to also delete `/var/log/lid_backlight.log*`:
 
 ```bash
 sudo ./uninstall.sh --purge

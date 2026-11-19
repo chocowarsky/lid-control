@@ -12,7 +12,7 @@ usage() {
 Usage: sudo ./uninstall.sh [OPTIONS]
 
 Options:
-  --purge     Also remove /var/log/lid_backlight.log* and stale *.bak-* files
+  --purge     Also remove /var/log/lid_backlight.log*
   -h, --help  Show this help message
 EOF
 }
@@ -61,7 +61,7 @@ else
     fi
 fi
 
-# 2. Remove ACPI configuration, logrotate rule, and CLI utility
+# 2. Remove ACPI configuration, logrotate rule, CLI utility, and stale backups
 echo "[*] Removing ACPI configuration, logrotate policy, and CLI..."
 rm -f \
     /etc/acpi/events/lid-state \
@@ -69,6 +69,11 @@ rm -f \
     /etc/logrotate.d/lid-control \
     /usr/local/bin/lid-control \
     /etc/systemd/logind.conf.d/99-lid-ignore.conf
+backups=(/usr/local/bin/lid-control.bak-* /etc/acpi/lid_backlight.sh.bak-*)
+if [ "${#backups[@]}" -gt 0 ]; then
+    echo "[*] Removing ${#backups[@]} stale backup file(s)..."
+    rm -f "${backups[@]}"
+fi
 systemctl restart acpid.service 2>/dev/null || true
 
 # 3. Remove persistent state directory
@@ -77,12 +82,10 @@ if [ -d /var/lib/lid-control ]; then
     rm -rf /var/lib/lid-control
 fi
 
-# 4. Optionally purge logs and stale .bak-* files
+# 4. Optionally purge logs
 if [ "$PURGE" -eq 1 ]; then
-    echo "[*] Purging logs and stale backup files..."
+    echo "[*] Purging logs..."
     rm -f /var/log/lid_backlight.log*
-    backups=(/usr/local/bin/lid-control.bak-* /etc/acpi/lid_backlight.sh.bak-*)
-    [ "${#backups[@]}" -gt 0 ] && rm -f "${backups[@]}"
 fi
 
 echo ""

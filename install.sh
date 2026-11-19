@@ -9,7 +9,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
 STATE_DIR="/var/lib/lid-control"
 
 ENABLE_ON_INSTALL=1
-CLEAN_BACKUPS=0
+CLEAN_BACKUPS=1
 
 usage() {
     cat << 'EOF'
@@ -17,7 +17,7 @@ Usage: sudo ./install.sh [OPTIONS]
 
 Options:
   --no-enable       Install files without activating 'lid-control on'
-  --clean-backups   Remove stale *.bak-* files from /usr/local/bin and /etc/acpi
+  --keep-backups    Keep any existing *.bak-* files in /usr/local/bin and /etc/acpi
   -h, --help        Show this help message
 EOF
 }
@@ -29,6 +29,9 @@ while [ "$#" -gt 0 ]; do
             ;;
         --clean-backups)
             CLEAN_BACKUPS=1
+            ;;
+        --keep-backups)
+            CLEAN_BACKUPS=0
             ;;
         -h|--help)
             usage
@@ -47,7 +50,7 @@ if [ "$(id -u)" -ne 0 ]; then
     echo "[*] Elevating to root privileges for installation..."
     args=()
     [ "$ENABLE_ON_INSTALL" -eq 0 ] && args+=(--no-enable)
-    [ "$CLEAN_BACKUPS" -eq 1 ] && args+=(--clean-backups)
+    [ "$CLEAN_BACKUPS" -eq 0 ] && args+=(--keep-backups)
     exec sudo "$(realpath "$0")" "${args[@]}"
 fi
 
