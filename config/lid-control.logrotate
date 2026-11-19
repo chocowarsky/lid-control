@@ -1,0 +1,8 @@
+/var/log/lid_backlight.log {
+    weekly
+    rotate 4
+    compress
+    missingok
+    notifempty
+    copytruncate
+}

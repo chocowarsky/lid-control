@@ -15,6 +15,7 @@ Desktop-level solutions (such as GNOME Shell extensions) suffer from Wayland per
 - **Exact Preset Preservation**: Display brightness slider is 100% untouched by delegating screen blanking to GNOME's native DPMS (`'blank'`), eliminating Mutter out-of-range clamp bugs.
 - **Full Keyboard LED Preset Support**: Directly powers down keyboard LEDs (`/sys/class/leds/*kbd_backlight`) via `acpid` and restores the exact saved level (including level `0` / OFF) across lid cycles and reboots.
 - **Persistent State Storage**: Stores state in `/var/lib/lid-control/` instead of volatile RAM (`/tmp`), surviving reboots and system cleanup.
+- **Inactive-Mode Safety Guard**: Skips ACPI sysfs changes whenever `lid-control` mode is `off` (`99-lid-ignore.conf` absent), preventing races with `systemd-logind` suspend/resume.
 - **Non-Desktop Fallback**: Gracefully falls back to direct sysfs backlight control when running outside a graphical session (TTY / headless).
 
 ---
@@ -24,15 +25,19 @@ Desktop-level solutions (such as GNOME Shell extensions) suffer from Wayland per
 1. **`systemd-logind` Drop-in (`/etc/systemd/logind.conf.d/99-lid-ignore.conf`)**:
    Configures `HandleLidSwitch=ignore`, `HandleLidSwitchExternalPower=ignore`, and `HandleLidSwitchDocked=ignore` to prevent OS suspension when the lid closes.
 2. **GNOME Power Policy**:
-   Sets `org.gnome.settings-daemon.plugins.power` `lid-close-ac-action` and `lid-close-battery-action` to `'blank'` so Mutter powers off the display panel cleanly via DPMS while keeping the brightness setting intact.
+   Sets `org.gnome.settings-daemon.plugins.power` `lid-close-ac-action` and `lid-close-battery-action` to `'blank'` so Mutter powers off the display panel cleanly via DRM/DPMS while keeping the brightness setting intact.
 3. **ACPI Event Rule (`/etc/acpi/events/lid-state`)**:
    Listens for kernel `button/lid.*` hardware events via `acpid`.
-4. **Hardware Action Script (`/etc/acpi/lid_backlight.sh`)**:
-   Reads physical lid status from `/proc/acpi/button/lid/*/state`:
+4. **Hardware Action Script (`/etc/acpi/lid_backlight.sh` ← `scripts/lid_backlight.sh`)**:
+   Verifies `99-lid-ignore.conf` is active, then reads physical lid status from `/proc/acpi/button/lid/*/state`:
    - **`closed`**: Saves current keyboard brightness (0–3) to `/var/lib/lid-control/last_kbd_brightness` and turns off keyboard LEDs. Falls back to sysfs screen power-off only if no desktop compositor is active.
    - **`open`**: Restores keyboard LEDs to their exact previous level (0, 1, 2, or 3) and unblanks fallback devices.
-5. **CLI Utility (`/usr/local/bin/lid-control`)**:
-   Instant terminal management for inspecting status, toggling modes, or reading hardware event logs.
+5. **CLI Utility (`/usr/local/bin/lid-control` ← `bin/lid-control`)**:
+   Instant terminal management for inspecting status (including DRM panel `enabled`/DPMS state and `acpid` unit/socket/path status), toggling modes, or reading hardware event logs.
+6. **Log Rotation (`/etc/logrotate.d/lid-control` ← `config/lid-control.logrotate`)**:
+   Rotates `/var/log/lid_backlight.log` weekly (keeps 4 compressed archives).
+
+See [AUDIT.md](AUDIT.md) for the full technical audit and changelog of security/reliability fixes.
 
 ---
 
@@ -51,6 +56,10 @@ chmod +x install.sh uninstall.sh
 sudo ./install.sh
 ```
 
+Optional installer flags:
+- `sudo ./install.sh --clean-backups`: Also removes stale `*.bak-*` backup files from `/usr/local/bin` and `/etc/acpi`.
+- `sudo ./install.sh --no-enable`: Installs files and logrotate policy without enabling `lid-control on` immediately.
+
 ---
 
 ## Usage
@@ -58,7 +67,7 @@ sudo ./install.sh
 Once installed, the `lid-control` CLI is available system-wide:
 
 ```bash
-# Inspect current mode, acpid status, lid state, and backlight levels
+# Inspect current mode, acpid status, lid state, DRM panel/DPMS, and backlight levels
 lid-control status
 
 # View recent ACPI lid open/close event logs (/var/log/lid_backlight.log)
@@ -76,11 +85,12 @@ sudo lid-control off
 ```text
 === Laptop Lid Control Status (acpid + systemd-logind) ===
 Mode Status       : ACTIVE (Screen Blank & Keyboard Off, No Suspend)
-acpid Service     : active
-Lid Hardware State: open
-Display Backlight : 185166 / 400000
-Keyboard Backlight: 1 / 3
-Saved Kbd Preset  : Level 1 (persistent in /var/lib/lid-control)
+acpid Service     : active (socket: active, path: active)
+Lid Hardware State: closed
+Panel State       : disabled (DPMS: Off) [card1-eDP-1]
+Display Backlight : 132605 / 400000
+Keyboard Backlight: 0 / 3
+Saved Kbd Preset  : Level 0 (persistent in /var/lib/lid-control)
 Logind Override   : Active (/etc/systemd/logind.conf.d/99-lid-ignore.conf)
 GNOME Lid AC      : 'blank'
 GNOME Lid Battery : 'blank'
@@ -90,10 +100,16 @@ GNOME Lid Battery : 'blank'
 
 ## Uninstallation
 
-To cleanly remove all system hooks, scripts, and restore default Ubuntu suspend behavior:
+To cleanly remove all system hooks, scripts, logrotate rule, and restore default Ubuntu suspend behavior:
 
 ```bash
 sudo ./uninstall.sh
+```
+
+Pass `--purge` to also delete `/var/log/lid_backlight.log*` and any stale `*.bak-*` backup files:
+
+```bash
+sudo ./uninstall.sh --purge
 ```
 
 ---
