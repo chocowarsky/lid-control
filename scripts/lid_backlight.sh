@@ -83,6 +83,54 @@ restore_sysfs() {
     log_event "restored $label brightness: $saved"
 }
 
+has_external_monitor() {
+    local status_files=("$SYSROOT"/sys/class/drm/card*-*/status)
+    local sf conn_name state
+    for sf in "${status_files[@]}"; do
+        conn_name=$(basename "$(dirname "$sf")")
+        case "$conn_name" in
+            *-eDP-*|*-LVDS-*|*-DSI-*|*-Writeback-*)
+                continue
+                ;;
+        esac
+        state=$(cat "$sf" 2>/dev/null || true)
+        if [[ "$state" = "connected" ]]; then
+            return 0
+        fi
+    done
+    return 1
+}
+
+set_gnome_dpms() {
+    local mode="$1"
+    local buses=("$SYSROOT"/run/user/*/bus)
+    local bus uid user updated=1
+    local prefix=()
+    for bus in "${buses[@]}"; do
+        [[ -e "$bus" ]] || continue
+        uid=$(basename "$(dirname "$bus")")
+        prefix=()
+        if [[ -z "$SYSROOT" ]]; then
+            is_uint "$uid" || continue
+            user=$(id -un "$uid" 2>/dev/null || true)
+            if [[ -z "$user" || "$user" = "root" || "$user" = "gdm" || "$user" = "Debian-gdm" ]]; then
+                continue
+            fi
+            prefix=(sudo -u "$user")
+        fi
+        if "${prefix[@]}" env DBUS_SESSION_BUS_ADDRESS="unix:path=$bus" \
+            gdbus call --session \
+            --dest org.gnome.Mutter.DisplayConfig \
+            --object-path /org/gnome/Mutter/DisplayConfig \
+            --method org.freedesktop.DBus.Properties.Set \
+            "org.gnome.Mutter.DisplayConfig" "PowerSaveMode" "<int32 $mode>" \
+            >/dev/null 2>&1; then
+            updated=0
+        fi
+    done
+    return "$updated"
+}
+
 EVENT="${1:-unknown}"
 LID_STATE=$(get_lid_state)
 log_event "event: $EVENT | lid_state: ${LID_STATE:-unknown}"
@@ -107,9 +155,19 @@ if [[ "$LID_STATE" = "closed" ]]; then
     # Always turn off keyboard backlight on lid close, preserving exact level (including 0).
     save_and_blank_sysfs "$KBD_DIR" "$KBD_STATE_FILE" 0 "kbd"
 
-    # Under GNOME, lid-close-*-action='blank' handles display DPMS blanking cleanly via Mutter
-    # without altering sysfs brightness. Fallback to sysfs power-off only outside GNOME.
-    if [[ "$GNOME_RUNNING" -eq 0 ]]; then
+    # Display blanking:
+    # - Docked with external monitor under GNOME: let Mutter handle clamshell eDP disable.
+    # - Undocked under GNOME: switch Mutter PowerSaveMode to 3 (DPMS Off) without touching sysfs slider.
+    # - Outside GNOME (or if D-Bus fails): fallback to sysfs backlight power-off.
+    if [[ "$GNOME_RUNNING" -eq 1 ]]; then
+        if has_external_monitor; then
+            log_event "external monitor connected; Mutter handles eDP clamshell state"
+        elif set_gnome_dpms 3; then
+            log_event "set GNOME Mutter DPMS PowerSaveMode=3 (Off)"
+        else
+            save_and_blank_sysfs "$BACKLIGHT_DIR" "$STATE_FILE" 1 "display (GNOME DPMS fallback)"
+        fi
+    else
         save_and_blank_sysfs "$BACKLIGHT_DIR" "$STATE_FILE" 1 "display (non-GNOME fallback)"
     fi
 
@@ -117,8 +175,19 @@ elif [[ "$LID_STATE" = "open" ]]; then
     # Restore keyboard backlight to exact saved level (including level 0 if user disabled it).
     restore_sysfs "$KBD_DIR" "$KBD_STATE_FILE" 0 "kbd"
 
-    # Restore display backlight only when non-GNOME fallback turned sysfs off.
-    if [[ "$GNOME_RUNNING" -eq 0 ]]; then
+    # Wake Mutter DPMS on lid open under GNOME; restore sysfs fallback if used.
+    if [[ "$GNOME_RUNNING" -eq 1 ]]; then
+        if set_gnome_dpms 0; then
+            log_event "restored GNOME Mutter DPMS PowerSaveMode=0 (On)"
+        fi
+        if [[ -f "$STATE_FILE" && -n "$BACKLIGHT_DIR" && -f "$BACKLIGHT_DIR/brightness" ]]; then
+            cur_bl=$(cat "$BACKLIGHT_DIR/brightness" 2>/dev/null || echo "1")
+            if is_uint "$cur_bl" && [[ "$cur_bl" -eq 0 ]]; then
+                restore_sysfs "$BACKLIGHT_DIR" "$STATE_FILE" 1 "display (GNOME DPMS fallback)"
+            fi
+            rm -f "$STATE_FILE" 2>/dev/null || true
+        fi
+    else
         restore_sysfs "$BACKLIGHT_DIR" "$STATE_FILE" 1 "display (non-GNOME fallback)"
     fi
 fi

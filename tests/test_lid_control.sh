@@ -90,7 +90,15 @@ fi
 exit 0
 EOF
 
-chmod +x "$MOCK_BIN/sudo" "$MOCK_BIN/pgrep" "$MOCK_BIN/systemctl" "$MOCK_BIN/gsettings"
+cat << 'EOF' > "$MOCK_BIN/gdbus"
+#!/usr/bin/env bash
+if [[ -n "${LID_CONTROL_SYSROOT:-}" ]]; then
+    printf '%s\n' "$*" >> "${LID_CONTROL_SYSROOT}/var/log/mock_gdbus.log"
+fi
+exit "${MOCK_GDBUS_RC:-0}"
+EOF
+
+chmod +x "$MOCK_BIN/sudo" "$MOCK_BIN/pgrep" "$MOCK_BIN/systemctl" "$MOCK_BIN/gsettings" "$MOCK_BIN/gdbus"
 
 new_sysroot() {
     local root="$1"
@@ -100,6 +108,8 @@ new_sysroot() {
         "$root/sys/class/backlight/amdgpu_bl1" \
         "$root/sys/class/leds/asus::kbd_backlight" \
         "$root/sys/class/drm/card1-eDP-1" \
+        "$root/sys/class/drm/card1-HDMI-A-1" \
+        "$root/run/user/1000" \
         "$root/etc/acpi/events" \
         "$root/etc/systemd/logind.conf.d" \
         "$root/var/lib/lid-control" \
@@ -110,8 +120,11 @@ new_sysroot() {
     printf '400000\n' > "$root/sys/class/backlight/amdgpu_bl1/max_brightness"
     printf '2\n' > "$root/sys/class/leds/asus::kbd_backlight/brightness"
     printf '3\n' > "$root/sys/class/leds/asus::kbd_backlight/max_brightness"
+    printf 'connected\n' > "$root/sys/class/drm/card1-eDP-1/status"
     printf 'disabled\n' > "$root/sys/class/drm/card1-eDP-1/enabled"
     printf 'Off\n' > "$root/sys/class/drm/card1-eDP-1/dpms"
+    printf 'disconnected\n' > "$root/sys/class/drm/card1-HDMI-A-1/status"
+    : > "$root/run/user/1000/bus"
     cp "$REPO_DIR/config/lid-state" "$root/etc/acpi/events/lid-state"
     cp "$REPO_DIR/config/99-lid-ignore.conf" "$root/etc/systemd/logind.conf.d/99-lid-ignore.conf"
 }
@@ -223,7 +236,7 @@ else
     assert_eq "132605" "$(cat "$SYSROOT/sys/class/backlight/amdgpu_bl1/brightness")" "inactive guard leaves display brightness untouched"
     assert_contains "$(cat "$SYSROOT/var/log/lid_backlight.log")" "skipping hardware control" "inactive guard logs skip event"
 
-    # Test 3b: Active mode under GNOME (kbd save/blank/restore, display untouched)
+    # Test 3b: Active undocked mode under GNOME (Mutter DPMS PowerSaveMode + kbd save/blank/restore)
     new_sysroot "$SYSROOT"
     printf 'state:      closed\n' > "$SYSROOT/proc/acpi/button/lid/LID/state"
     LID_CONTROL_SYSROOT="$SYSROOT" MOCK_PGREP_RC=0 PATH="$MOCK_BIN:$PATH" \
@@ -231,11 +244,37 @@ else
     assert_eq "0" "$(cat "$SYSROOT/sys/class/leds/asus::kbd_backlight/brightness")" "GNOME close turns off kbd backlight"
     assert_eq "2" "$(cat "$SYSROOT/var/lib/lid-control/last_kbd_brightness")" "GNOME close saves exact kbd level 2"
     assert_eq "132605" "$(cat "$SYSROOT/sys/class/backlight/amdgpu_bl1/brightness")" "GNOME close preserves sysfs display backlight"
+    assert_contains "$(cat "$SYSROOT/var/log/mock_gdbus.log")" "<int32 3>" "GNOME undocked close sets Mutter PowerSaveMode=3 (Off)"
 
     printf 'state:      open\n' > "$SYSROOT/proc/acpi/button/lid/LID/state"
     LID_CONTROL_SYSROOT="$SYSROOT" MOCK_PGREP_RC=0 PATH="$MOCK_BIN:$PATH" \
         "$REPO_DIR/scripts/lid_backlight.sh" "button/lid"
     assert_eq "2" "$(cat "$SYSROOT/sys/class/leds/asus::kbd_backlight/brightness")" "GNOME open restores kbd level 2"
+    assert_contains "$(cat "$SYSROOT/var/log/mock_gdbus.log")" "<int32 0>" "GNOME open restores Mutter PowerSaveMode=0 (On)"
+
+    # Test 3b-ext: Active docked mode under GNOME (external monitor connected -> skips PowerSaveMode=3)
+    new_sysroot "$SYSROOT"
+    printf 'connected\n' > "$SYSROOT/sys/class/drm/card1-HDMI-A-1/status"
+    printf 'state:      closed\n' > "$SYSROOT/proc/acpi/button/lid/LID/state"
+    LID_CONTROL_SYSROOT="$SYSROOT" MOCK_PGREP_RC=0 PATH="$MOCK_BIN:$PATH" \
+        "$REPO_DIR/scripts/lid_backlight.sh" "button/lid"
+    if [[ ! -f "$SYSROOT/var/log/mock_gdbus.log" ]]; then
+        pass "GNOME docked close skips PowerSaveMode=3 so external monitor stays on"
+    else
+        fail "GNOME docked close should not set PowerSaveMode=3"
+    fi
+    assert_contains "$(cat "$SYSROOT/var/log/lid_backlight.log")" "external monitor connected" "GNOME docked close logs external monitor mode"
+
+    # Test 3b-fallback: Active undocked mode under GNOME when gdbus fails -> sysfs fallback & restore
+    new_sysroot "$SYSROOT"
+    printf 'state:      closed\n' > "$SYSROOT/proc/acpi/button/lid/LID/state"
+    LID_CONTROL_SYSROOT="$SYSROOT" MOCK_PGREP_RC=0 MOCK_GDBUS_RC=1 PATH="$MOCK_BIN:$PATH" \
+        "$REPO_DIR/scripts/lid_backlight.sh" "button/lid"
+    assert_eq "0" "$(cat "$SYSROOT/sys/class/backlight/amdgpu_bl1/brightness")" "GNOME DPMS failure falls back to sysfs display blanking"
+    printf 'state:      open\n' > "$SYSROOT/proc/acpi/button/lid/LID/state"
+    LID_CONTROL_SYSROOT="$SYSROOT" MOCK_PGREP_RC=0 MOCK_GDBUS_RC=1 PATH="$MOCK_BIN:$PATH" \
+        "$REPO_DIR/scripts/lid_backlight.sh" "button/lid"
+    assert_eq "132605" "$(cat "$SYSROOT/sys/class/backlight/amdgpu_bl1/brightness")" "GNOME open restores sysfs fallback display brightness"
 
     # Test 3c: Kbd backlight level 0 preservation
     new_sysroot "$SYSROOT"
